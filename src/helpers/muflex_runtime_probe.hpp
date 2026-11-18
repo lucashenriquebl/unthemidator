@@ -25,6 +25,7 @@
 #include "muflex_runtime_external.hpp"
 #include "muflex_runtime_coverage.hpp"
 #include "muflex_runtime_flow.hpp"
+#include "muflex_runtime_branch_probe.hpp"
 
 namespace muflex {
 
@@ -39,7 +40,7 @@ public:
           image_base_(memory->get_image_base()), image_size_(memory->get_image_size()), output_(directory),
           hotspot_(image, context, memory->get_image_base(), directory),
           external_(context, memory->get_image_base(), memory->get_image_size(), directory),
-          coverage_(directory), flow_(directory), budget_(budget) {}
+          coverage_(directory), flow_(directory), branch_probe_(image,context,memory->get_image_base(),directory), budget_(budget) {}
 
     runtime_probe(const runtime_probe&) = delete;
     runtime_probe& operator=(const runtime_probe&) = delete;
@@ -65,6 +66,7 @@ public:
         }
         image_writes_ << "write_index,instruction_index,pc,pc_rva,dest_va,dest_rva,dest_region,page_rva,size,value_low64_hex\n";
         hotspot_.begin();
+        branch_probe_.begin();
 
         const auto result = uc_hook_add(context_->get_uc(), &hook_, UC_HOOK_CODE,
                            reinterpret_cast<void*>(&runtime_probe::on_code), this, 1, 0);
@@ -97,6 +99,7 @@ public:
         external_.finish();
         coverage_.finish();
         flow_.finish();
+        branch_probe_.finish();
 
         std::ofstream summary(output_ / "runtime_summary.txt", std::ios::trunc);
         if (!summary) {
@@ -133,7 +136,8 @@ public:
                 << "coverage_untracked_global_pc_hits=" << coverage_.untracked_global_hits() << "\n"
                 << "flow_distinct_nonsequential_edges=" << flow_.edges() << "\n"
                 << "flow_nonsequential_transitions=" << flow_.nonlinear() << "\n"
-                << "flow_untracked_global_edge_events=" << flow_.untracked() << "\n";
+                << "flow_untracked_global_edge_events=" << flow_.untracked() << "\n"
+                << "targeted_JNE_observer_enabled=" << (branch_probe_.enabled() ? "true" : "false") << "\n";
         for (const auto& [region, count] : region_counts_) {
             summary << "instructions_in_" << sanitize(region) << "=" << count << '\n';
         }
@@ -250,6 +254,7 @@ private:
         last_pc_ = pc;
         coverage_.observe(pc);
         flow_.observe(pc, size);
+        branch_probe_.observe(uc, pc, observed_);
         const auto region = region_at(pc);
         ++region_counts_[region];
         const bool transition = region != last_region_;
@@ -309,6 +314,7 @@ private:
     muflex::runtime_external external_;
     muflex::runtime_coverage coverage_;
     muflex::runtime_flow flow_;
+    muflex::runtime_branch_probe branch_probe_;
     std::ofstream trace_;
     std::ofstream image_writes_;
     std::map<std::string, std::uint64_t> write_region_counts_;
