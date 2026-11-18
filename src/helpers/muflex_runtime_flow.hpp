@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <unordered_map>
@@ -46,7 +47,7 @@ public:
         // observed instruction. Do not label a discontinuity as a proven jump.
         if (have_previous_) {
             const bool no_overflow = previous_pc_ <=
-                std::numeric_limits<std::uint64_t>::max() - previous_size_;
+                (~std::uint64_t{0}) - previous_size_;
             const bool sequential = no_overflow && pc == previous_pc_ + previous_size_;
             if (sequential) {
                 ++window_.sequential_transitions;
