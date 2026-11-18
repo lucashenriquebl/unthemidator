@@ -16,6 +16,7 @@
 
 #include "../emulator/c_emulator_ctx.hpp"
 #include "../pe/c_pe_image.hpp"
+#include "muflex_runtime_export_name_probe.hpp"
 
 namespace muflex {
 
@@ -28,7 +29,7 @@ public:
                          const std::shared_ptr<c_emulator_ctx>& ctx,
                          std::uint64_t image_base,
                          std::filesystem::path out)
-        : context_(ctx), image_base_(image_base), output_(std::move(out)) {
+        : context_(ctx), image_base_(image_base), output_(std::move(out)), export_names_(output_) {
         enabled_ = image->is_x64() && image->get_entry_rva() == k_image_entry_rva;
     }
 
@@ -114,6 +115,7 @@ public:
             if (index == 0) {
                 row.memory_readable = (uc_mem_read(uc, row.rdi, &row.mem_rdi, 1) == UC_ERR_OK);
                 if (row.memory_readable) {
+                    export_names_.observe(uc, instruction_index, row.rdi, row.al, row.mem_rdi);
                     ++state.readable_rdi;
                     if ((row.al == row.mem_rdi) != (row.zf == 1)) {
                         ++state.cmp_flag_mismatches;
@@ -129,6 +131,7 @@ public:
     }
 
     void finish() {
+        export_names_.finish();
         if (!enabled_) {
             std::ofstream summary(output_ / "runtime_branch_summary.txt", std::ios::trunc);
             if (summary) summary << "enabled=false\nreason=Unexpected PE or JNE signature\n";
@@ -254,6 +257,7 @@ private:
     std::shared_ptr<c_emulator_ctx> context_;
     std::uint64_t image_base_ = 0;
     std::filesystem::path output_;
+    muflex::runtime_export_name_probe export_names_;
     std::array<branch_state,2> states_{};
     std::array<std::uint64_t,256> dh_taken_{};
     std::array<std::uint64_t,256> dh_fallthrough_{};
