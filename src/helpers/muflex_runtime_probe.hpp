@@ -22,6 +22,7 @@
 #include "../memory/c_memory_manager.hpp"
 #include "../pe/c_pe_image.hpp"
 #include "muflex_runtime_hotspot.hpp"
+#include "muflex_runtime_external.hpp"
 
 namespace muflex {
 
@@ -34,7 +35,9 @@ public:
                   const std::uint64_t budget)
         : image_(image), context_(context),
           image_base_(memory->get_image_base()), image_size_(memory->get_image_size()), output_(directory),
-          hotspot_(image, context, memory->get_image_base(), directory), budget_(budget) {}
+          hotspot_(image, context, memory->get_image_base(), directory),
+          external_(context, memory->get_image_base(), memory->get_image_size(), directory),
+          budget_(budget) {}
 
     runtime_probe(const runtime_probe&) = delete;
     runtime_probe& operator=(const runtime_probe&) = delete;
@@ -70,7 +73,7 @@ public:
         }
         const auto write_result = uc_hook_add(context_->get_uc(), &write_hook_, UC_HOOK_MEM_WRITE,
                             reinterpret_cast<void*>(&runtime_probe::on_memory), this,
-                            image_base_, image_base_ + image_size_ - 1);
+                            1, 0);  // All guest memory; route by original-image bounds.
         if (write_result != UC_ERR_OK) {
             std::cerr << "[MUFLEX_V19] failed to install image-write hook: "
                       << uc_strerror(write_result) << '\n';
@@ -89,6 +92,7 @@ public:
         if (trace_) trace_.flush();
         if (image_writes_) image_writes_.flush();
         hotspot_.finish();
+        external_.finish();
 
         std::ofstream summary(output_ / "runtime_summary.txt", std::ios::trunc);
         if (!summary) {
@@ -117,7 +121,9 @@ public:
                 << "hotspot_guest_writes=" << hotspot_.write_count() << "\n"
                 << "hotspot_distinct_keys=" << hotspot_.distinct_keys() << "\n"
                 << "hotspot_dropped_key_events=" << hotspot_.dropped_keys() << "\n"
-                << "hotspot_changed_bytes=" << hotspot_.changed_bytes() << "\n";
+                << "hotspot_changed_bytes=" << hotspot_.changed_bytes() << "\n"
+                << "external_guest_writes=" << external_.total_writes() << "\n"
+                << "external_tracked_pages=" << external_.tracked_pages() << "\n";
         for (const auto& [region, count] : region_counts_) {
             summary << "instructions_in_" << sanitize(region) << "=" << count << '\n';
         }
@@ -187,7 +193,12 @@ private:
                                              address, size, static_cast<std::uint64_t>(value));
             }
         }
-        self->observe_write(uc, address, size, value);
+        if (self->external_.is_external(address)) {
+            self->external_.observe(self->observed_, self->last_pc_, address,
+                                    size, static_cast<std::uint64_t>(value));
+        } else {
+            self->observe_write(uc, address, size, value);
+        }
     }
 
     void observe_write(uc_engine* uc, const std::uint64_t dest,
@@ -283,6 +294,7 @@ private:
     std::uint64_t image_size_ = 0;
     std::filesystem::path output_;
     muflex::runtime_hotspot hotspot_;
+    muflex::runtime_external external_;
     std::ofstream trace_;
     std::ofstream image_writes_;
     std::map<std::string, std::uint64_t> write_region_counts_;
