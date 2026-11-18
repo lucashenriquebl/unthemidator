@@ -1,4 +1,4 @@
-name: Windows x64 MSBuild - MuFlex V22
+name: Windows x64 MSBuild - MuFlex V23
 
 on:
   push:
@@ -9,6 +9,7 @@ on:
       - feat/muflex-v20-hotspot-page-trace
       - feat/muflex-v21-external-memory-probe
       - feat/muflex-v22-runtime-coverage-windows
+      - feat/muflex-v23-runtime-flow-edges
   pull_request:
 
 jobs:
