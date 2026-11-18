@@ -1,9 +1,10 @@
-name: Windows x64 MSBuild - MuFlex V14
+name: Windows x64 MSBuild - MuFlex V18
 
 on:
   push:
     branches:
       - fix/muflex-v14-stage0-capture-msbuild
+      - feat/muflex-v18-bounded-runtime-probe
   pull_request:
 
 jobs:
@@ -46,5 +47,8 @@ jobs:
         run: |
           $exe = ".\build\Release\unthemidator.exe"
           if (-not (Test-Path $exe)) { throw "Missing built executable" }
-          & $exe --help
+          $helpText = (& $exe --help | Out-String)
           if ($LASTEXITCODE -ne 0) { throw "Help smoke test failed" }
+          if (-not $helpText.Contains("--runtime-probe-dir") -or -not $helpText.Contains("--runtime-budget")) {
+            throw "V18 command-line flags missing"
+          }

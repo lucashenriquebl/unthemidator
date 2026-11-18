@@ -11,6 +11,7 @@
 #include "helpers/utils.hpp"
 #include "helpers/json.hpp"
 #include "helpers/muflex_stage0_diagnostics.hpp"
+#include "helpers/muflex_runtime_probe.hpp"
 #include "unpacker/c_themida_unpacker.hpp"
 #include "pe/c_pe_builder.hpp"
 
@@ -21,6 +22,8 @@ int main(int argc, char *argv[]) {
         std::string m_vms_path;
         std::string m_license_path;
         bool m_skip_startup = false;
+        std::string m_runtime_probe_dir{};
+        uint64_t m_runtime_budget = 250000;
     } options{};
 
     std::string input_path;
@@ -42,6 +45,8 @@ int main(int argc, char *argv[]) {
                     "  --vm-depth <0..65535> Virtualization layers to explore (default: 0)\n"
                     "  --no-imp             Skip imports lookup\n"
                     "  --no-startup         Only unpack the initial boot stage\n"
+                    "  --runtime-probe-dir <path>  Observe bounded Unicorn startup and exit (no rebuilt PE)\n"
+                    "  --runtime-budget <n>       Instruction limit 1000..2000000 (default 250000)\n"
                     "  --no-vm-lookup       Skip virtual machines lookup\n"
                     "  --no-loader          Skip fixer loader generation\n";
                 return 0;
@@ -53,7 +58,8 @@ int main(int argc, char *argv[]) {
             }
 
             if (!positional_only && (arg == "--out-file" || arg == "--imports-file" || arg == "--vms-file" ||
-                arg == "--vm-depth" || arg == "--license-file")) {
+                arg == "--vm-depth" || arg == "--license-file" ||
+                arg == "--runtime-probe-dir" || arg == "--runtime-budget")) {
                 if (++i == argc || !argv[i][0] || std::string_view(argv[i]).starts_with("--")) {
                     throw std::runtime_error("missing value for " + arg);
                 }
@@ -68,6 +74,16 @@ int main(int argc, char *argv[]) {
                     options.m_vms_path = value;
                 } else if (arg == "--license-file") {
                     options.m_license_path = value;
+                } else if (arg == "--runtime-probe-dir") {
+                    options.m_runtime_probe_dir = value;
+                } else if (arg == "--runtime-budget") {
+                    uint64_t budget = 0;
+                    if (const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), budget);
+                        error != std::errc{} || end != value.data() + value.size() ||
+                        budget < 1000 || budget > 2000000) {
+                        throw std::runtime_error("--runtime-budget must be 1000..2000000");
+                    }
+                    options.m_runtime_budget = budget;
                 } else {
                     uint16_t depth = 0;
 
@@ -101,6 +117,14 @@ int main(int argc, char *argv[]) {
 
         if (!has_input) {
             throw std::runtime_error("input binary is required: unthemidator [options] <path_to_binary>");
+        }
+
+        if (!options.m_runtime_probe_dir.empty() && options.m_skip_startup) {
+            throw std::runtime_error("--runtime-probe-dir cannot be combined with --no-startup");
+        }
+        if (!options.m_runtime_probe_dir.empty()) {
+            options.m_skip_loader = true;
+            options.m_skip_vm_lookup = true;
         }
 
         const std::filesystem::path input(input_path);
@@ -447,6 +471,32 @@ int main(int argc, char *argv[]) {
     }
 
     std::cout << std::endl;
+
+    // V18: bounded diagnostic execution of the runtime within Unicorn only.
+    // Do not build or write an unverified PE from this observational mode.
+    if (!options.m_runtime_probe_dir.empty()) {
+        muflex::runtime_probe runtime_probe(pe_image, emulator_ctx, memory_manager,
+                                            options.m_runtime_probe_dir, options.m_runtime_budget);
+        if (!runtime_probe.start()) {
+            return 1;
+        }
+
+        bool startup_returned = false;
+        std::string startup_error;
+        try {
+            unpacker->startup();
+            startup_returned = true;
+        } catch (const std::exception& e) {
+            startup_error = e.what();
+            std::cerr << "[MUFLEX_V18] startup probe ended with exception: " << startup_error << '\n';
+        }
+
+        runtime_probe.finish(startup_returned, startup_error, unpacker->get_oep_rva(),
+                             unpacker->get_recovered_imports().size(),
+                             unpacker->get_vm_trampolines().size());
+        std::cout << "[MUFLEX_V18] observation finished; no rebuilt PE was written by runtime-probe mode" << '\n';
+        return runtime_probe.limit_reached() || !startup_returned ? 2 : 0;
+    }
 
     // startup Themida runtime (lightning VM entrypoint)
     try {
