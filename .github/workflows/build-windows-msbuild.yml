@@ -1,4 +1,4 @@
-name: Windows x64 MSBuild - MuFlex V20
+name: Windows x64 MSBuild - MuFlex V21
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
       - feat/muflex-v18-bounded-runtime-probe
       - feat/muflex-v19-runtime-image-writes
       - feat/muflex-v20-hotspot-page-trace
+      - feat/muflex-v21-external-memory-probe
   pull_request:
 
 jobs:
