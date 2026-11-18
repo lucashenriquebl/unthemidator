@@ -1,4 +1,4 @@
-name: Windows x64 MSBuild - MuFlex V19
+name: Windows x64 MSBuild - MuFlex V20
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
       - fix/muflex-v14-stage0-capture-msbuild
       - feat/muflex-v18-bounded-runtime-probe
       - feat/muflex-v19-runtime-image-writes
+      - feat/muflex-v20-hotspot-page-trace
   pull_request:
 
 jobs:
