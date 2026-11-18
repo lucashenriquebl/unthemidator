@@ -54,4 +54,4 @@ Se os arquivos `GameServer.prelude.*` não aparecerem, verifique se o EXE novo f
 
 ## Testes
 
-A workflow `.github/workflows/build-windows-msbuild.yml` compila Release x64 e executa somente `unthemidator.exe --help`, nunca os executáveis protegidos. O runner usa Visual Studio 2022 por disponibilidade de CI; o script local acima usa exclusivamente MSBuild do Visual Studio 2026.
+A workflow `.github/workflows/build-windows-msbuild.yml` compila Release x64 e executa somente `unthemidator.exe --help`, nunca os executáveis protegidos. O runner Windows 2025/VS2026 do CI e o script local utilizam Visual Studio 2026; a compilação é realizada pelo MSBuild.
