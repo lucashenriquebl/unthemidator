@@ -1,4 +1,4 @@
-# MuFlex V14 — captura Stage0 usando MSBuild (VS2026)
+# MuFlex V15 — captura Stage0 + rastreamento de escritas (VS2026)
 
 Esta alteração usa o código-fonte do Unthemidator original e adiciona instrumentação **opcional**. Não execute o GameServer reconstruído: o Stage0 ainda é não validado. O modo `--no-startup` não executa a inicialização do jogo, mas **emula** a rotina de descompressão contida no arquivo.
 
@@ -7,8 +7,8 @@ Esta alteração usa o código-fonte do Unthemidator original e adiciona instrum
 Em uma cópia limpa:
 
 ```powershell
-git clone --branch fix/muflex-v14-stage0-capture-msbuild --recurse-submodules https://github.com/lucashenriquebl/unthemidator.git C:\S21Lab\unthemidator-v14
-cd C:\S21Lab\unthemidator-v14
+git clone --branch feat/muflex-v15-trace-real-writes --recurse-submodules https://github.com/lucashenriquebl/unthemidator.git C:\S21Lab\unthemidator-v15
+cd C:\S21Lab\unthemidator-v15
 ```
 
 Se já clonou a branch, execute `git submodule update --init --recursive`.
@@ -24,9 +24,9 @@ O script verifica as dependências, reutiliza `build/*.sln*` ou gera a solução
 ## 3. Executar apenas a captura emulada, na VM
 
 ```powershell
-$Repo = "C:\S21Lab\unthemidator-v14"
+$Repo = "C:\S21Lab\unthemidator-v15"
 $Exe = "$Repo\build\Release\unthemidator.exe"
-$Output = "C:\S21Lab\resultados_v14"
+$Output = "C:\S21Lab\resultados_v15"
 New-Item -ItemType Directory -Path $Output -Force | Out-Null
 $env:MUFLEX_STAGE0_DIR = $Output
 
@@ -65,8 +65,8 @@ A execução na VM produziu snapshots de 8192 bytes com leitura Unicorn bem-suce
 Após atualizar a branch, **recompile** para incluir o novo instrumento:
 
 ```powershell
-cd C:\S21Lab\unthemidator-v14
-git pull origin fix/muflex-v14-stage0-capture-msbuild
+cd C:\S21Lab\unthemidator-v15
+git pull origin feat/muflex-v15-trace-real-writes
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-v14-vs2026.ps1
 ```
 
