@@ -1,4 +1,4 @@
-name: Windows x64 MSBuild - MuFlex V23
+name: Windows x64 MSBuild - MuFlex V24
 
 on:
   push:
@@ -10,6 +10,7 @@ on:
       - feat/muflex-v21-external-memory-probe
       - feat/muflex-v22-runtime-coverage-windows
       - feat/muflex-v23-runtime-flow-edges
+      - feat/muflex-v24-conditional-branches
   pull_request:
 
 jobs:
