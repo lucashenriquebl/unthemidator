@@ -10,6 +10,7 @@
 #include "emulator/hooks.hpp"
 #include "helpers/utils.hpp"
 #include "helpers/json.hpp"
+#include "helpers/muflex_stage0_diagnostics.hpp"
 #include "unpacker/c_themida_unpacker.hpp"
 #include "pe/c_pe_builder.hpp"
 
@@ -430,11 +431,17 @@ int main(int argc, char *argv[]) {
     // create unpacker instance
     const auto unpacker = std::make_shared<c_themida_unpacker>(options, pe_image, emulator_ctx, memory_manager);
 
+    // Disabled by default; enabled only when MUFLEX_STAGE0_DIR is set.
+    muflex::stage0_diagnostics stage0_diagnostics(pe_image, emulator_ctx, memory_manager);
+    stage0_diagnostics.begin();
+
     // decompress binary (if it's compressed)
     try {
        unpacker->decompress_bin();
+       stage0_diagnostics.finish("after");
     } catch (std::runtime_error &e) {
         std::cerr << "[unthemidator] failed to decompress binary: " << e.what() << std::endl;
+        stage0_diagnostics.finish("failure");
 
         return 1; // decompression is a critical stage, if it fails, we can't proceed further
     }
