@@ -84,12 +84,31 @@ public:
             watch_hook_ = 0;
             std::cerr << "[MUFLEX_V14] memory watch unavailable: " << uc_strerror(result) << '\n';
         }
+
+        // Observe writes to the actual output, not only a presumed LZ source.
+        writes_csv_.open(output_dir_ / "GameServer.prelude.LZ_WRITES.csv", std::ios::trunc);
+        if (writes_csv_) {
+            writes_csv_ << "event,va,rva,dest_offset,rip,rip_rva,write_size,value_u64,rsi,rdi\n";
+            const std::uint64_t destination = image_base_ + k_themida_rva;
+            const auto write_status = uc_hook_add(context_->get_uc(), &write_hook_,
+                               UC_HOOK_MEM_WRITE,
+                               reinterpret_cast<void*>(&stage0_diagnostics::write_event),
+                               this, destination, destination + k_trace_size - 1);
+            if (write_status != UC_ERR_OK) {
+                write_hook_ = 0;
+                std::cerr << "[MUFLEX_V14] output write trace unavailable: "
+                          << uc_strerror(write_status) << '\n';
+            }
+        } else {
+            std::cerr << "[MUFLEX_V14] cannot open output write CSV\n";
+        }
     }
 
     void finish(const char* stage) {
         if (!enabled_) return;
         remove_watch();
         if (csv_) csv_.flush();
+        if (writes_csv_) writes_csv_.flush();
         capture_window(stage);
     }
 
@@ -99,6 +118,8 @@ private:
     static constexpr std::uint64_t k_window_rva = k_themida_rva - 0x1000;
     static constexpr std::size_t k_page_size = 0x1000;
     static constexpr std::size_t k_max_events = 256;
+    static constexpr std::uint64_t k_trace_size = 0x200;
+    static constexpr std::size_t k_max_write_events = 4096;
 
     static void memory_event(uc_engine* uc, uc_mem_type type, std::uint64_t address,
                              int size, std::int64_t value, void* user_data) {
@@ -123,7 +144,38 @@ private:
                    << static_cast<int>(read_result) << '\n';
     }
 
+    static void write_event(uc_engine* uc, uc_mem_type type, std::uint64_t address,
+                            int size, std::int64_t value, void* user_data) {
+        auto* self = static_cast<stage0_diagnostics*>(user_data);
+        if (!self || !self->writes_csv_ || type != UC_MEM_WRITE ||
+            self->write_event_count_ >= k_max_write_events || size <= 0) return;
+        const std::uint64_t destination = self->image_base_ + k_themida_rva;
+        if (address >= destination + k_trace_size ||
+            (address < destination && static_cast<std::uint64_t>(size) <= destination - address)) return;
+        std::uint64_t rip = 0, rsi = 0, rdi = 0;
+        const auto pc_status = uc_reg_read(uc, UC_X86_REG_RIP, &rip);
+        uc_reg_read(uc, UC_X86_REG_RSI, &rsi);
+        uc_reg_read(uc, UC_X86_REG_RDI, &rdi);
+        const auto rip_rva = pc_status == UC_ERR_OK && rip >= self->image_base_
+            ? rip - self->image_base_ : 0;
+        ++self->write_event_count_;
+        self->writes_csv_ << self->write_event_count_ << ",0x" << std::hex << address
+                          << ",0x" << (address >= self->image_base_ ? address - self->image_base_ : 0)
+                          << ",0x" << (address >= destination ? address - destination : 0)
+                          << ",0x" << (pc_status == UC_ERR_OK ? rip : 0)
+                          << ",0x" << rip_rva << std::dec << ',' << size
+                          << ",0x" << std::hex << static_cast<std::uint64_t>(value)
+                          << ",0x" << rsi << ",0x" << rdi << std::dec << '\n';
+    }
+
     void remove_watch() {
+        if (write_hook_) {
+            const auto result = uc_hook_del(context_->get_uc(), write_hook_);
+            if (result != UC_ERR_OK) {
+                std::cerr << "[MUFLEX_V14] output write watch removal failed: " << uc_strerror(result) << '\n';
+            }
+            write_hook_ = 0;
+        }
         if (watch_hook_) {
             const auto result = uc_hook_del(context_->get_uc(), watch_hook_);
             if (result != UC_ERR_OK) {
@@ -166,7 +218,10 @@ private:
     std::uint64_t image_base_ = 0;
     std::filesystem::path output_dir_;
     std::ofstream csv_;
+    std::ofstream writes_csv_;
     uc_hook watch_hook_ = 0;
+    uc_hook write_hook_ = 0;
+    std::size_t write_event_count_ = 0;
     std::size_t event_count_ = 0;
     bool enabled_ = false;
 };
