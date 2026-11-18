@@ -1,10 +1,11 @@
-name: Windows x64 MSBuild - MuFlex V18
+name: Windows x64 MSBuild - MuFlex V19
 
 on:
   push:
     branches:
       - fix/muflex-v14-stage0-capture-msbuild
       - feat/muflex-v18-bounded-runtime-probe
+      - feat/muflex-v19-runtime-image-writes
   pull_request:
 
 jobs:
