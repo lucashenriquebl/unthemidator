@@ -23,6 +23,7 @@
 #include "../pe/c_pe_image.hpp"
 #include "muflex_runtime_hotspot.hpp"
 #include "muflex_runtime_external.hpp"
+#include "muflex_runtime_coverage.hpp"
 
 namespace muflex {
 
@@ -37,7 +38,7 @@ public:
           image_base_(memory->get_image_base()), image_size_(memory->get_image_size()), output_(directory),
           hotspot_(image, context, memory->get_image_base(), directory),
           external_(context, memory->get_image_base(), memory->get_image_size(), directory),
-          budget_(budget) {}
+          coverage_(directory), budget_(budget) {}
 
     runtime_probe(const runtime_probe&) = delete;
     runtime_probe& operator=(const runtime_probe&) = delete;
@@ -93,6 +94,7 @@ public:
         if (image_writes_) image_writes_.flush();
         hotspot_.finish();
         external_.finish();
+        coverage_.finish();
 
         std::ofstream summary(output_ / "runtime_summary.txt", std::ios::trunc);
         if (!summary) {
@@ -123,7 +125,10 @@ public:
                 << "hotspot_dropped_key_events=" << hotspot_.dropped_keys() << "\n"
                 << "hotspot_changed_bytes=" << hotspot_.changed_bytes() << "\n"
                 << "external_guest_writes=" << external_.total_writes() << "\n"
-                << "external_tracked_pages=" << external_.tracked_pages() << "\n";
+                << "external_tracked_pages=" << external_.tracked_pages() << "\n"
+                << "coverage_distinct_pc_keys=" << coverage_.distinct_pcs() << "\n"
+                << "coverage_windows=" << coverage_.windows() << "\n"
+                << "coverage_untracked_global_pc_hits=" << coverage_.untracked_global_hits() << "\n";
         for (const auto& [region, count] : region_counts_) {
             summary << "instructions_in_" << sanitize(region) << "=" << count << '\n';
         }
@@ -238,6 +243,7 @@ private:
     void observe(uc_engine* uc, const std::uint64_t pc, const std::uint32_t size) {
         ++observed_;
         last_pc_ = pc;
+        coverage_.observe(pc);
         const auto region = region_at(pc);
         ++region_counts_[region];
         const bool transition = region != last_region_;
@@ -295,6 +301,7 @@ private:
     std::filesystem::path output_;
     muflex::runtime_hotspot hotspot_;
     muflex::runtime_external external_;
+    muflex::runtime_coverage coverage_;
     std::ofstream trace_;
     std::ofstream image_writes_;
     std::map<std::string, std::uint64_t> write_region_counts_;
