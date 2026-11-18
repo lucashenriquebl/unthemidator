@@ -1,4 +1,4 @@
-name: Windows x64 MSBuild - MuFlex V24
+name: Windows x64 MSBuild - MuFlex V25
 
 on:
   push:
@@ -11,6 +11,7 @@ on:
       - feat/muflex-v22-runtime-coverage-windows
       - feat/muflex-v23-runtime-flow-edges
       - feat/muflex-v24-conditional-branches
+      - feat/muflex-v25-export-name-trace
   pull_request:
 
 jobs:
