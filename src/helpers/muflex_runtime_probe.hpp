@@ -117,7 +117,7 @@ private:
         const auto rva = pc - image_base_;
         for (const auto& section : image_->get_sections()) {
             const auto start = static_cast<std::uint64_t>(section.virtual_address);
-            const auto end = start + std::max(section.virtual_size, section.raw_size);
+            const auto end = start + (section.virtual_size > section.raw_size ? section.virtual_size : section.raw_size);
             if (rva >= start && rva < end) {
                 return section.name.empty() ? "unnamed_section" : section.name;
             }
@@ -143,7 +143,7 @@ private:
                                    transition || observed_ % k_sample_period == 0 ||
                                    observed_ == budget_)) {
             std::array<std::uint8_t, 16> bytes{};
-            const auto read_size = std::min<std::uint32_t>(size, static_cast<std::uint32_t>(bytes.size()));
+            const auto read_size = (size < bytes.size() ? size : static_cast<std::uint32_t>(bytes.size()));
             const auto read_status = uc_mem_read(uc, pc, bytes.data(), read_size);
             std::ostringstream hex;
             if (read_status == UC_ERR_OK) {
