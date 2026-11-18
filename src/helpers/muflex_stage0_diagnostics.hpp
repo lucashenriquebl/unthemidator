@@ -88,7 +88,7 @@ public:
         // Observe writes to the actual output, not only a presumed LZ source.
         writes_csv_.open(output_dir_ / "GameServer.prelude.LZ_WRITES.csv", std::ios::trunc);
         if (writes_csv_) {
-            writes_csv_ << "event,va,rva,dest_offset,rip,rip_rva,write_size,value_u64,rsi,rdi\\n";
+            writes_csv_ << "event,va,rva,dest_offset,rip,rip_rva,write_size,value_u64,rsi,rdi\n";
             const std::uint64_t destination = image_base_ + k_themida_rva;
             const auto write_status = uc_hook_add(context_->get_uc(), &write_hook_,
                                UC_HOOK_MEM_WRITE,
@@ -97,10 +97,10 @@ public:
             if (write_status != UC_ERR_OK) {
                 write_hook_ = 0;
                 std::cerr << "[MUFLEX_V14] output write trace unavailable: "
-                          << uc_strerror(write_status) << '\\n';
+                          << uc_strerror(write_status) << '\n';
             }
         } else {
-            std::cerr << "[MUFLEX_V14] cannot open output write CSV\\n";
+            std::cerr << "[MUFLEX_V14] cannot open output write CSV\n";
         }
     }
 
@@ -165,14 +165,14 @@ private:
                           << ",0x" << (pc_status == UC_ERR_OK ? rip : 0)
                           << ",0x" << rip_rva << std::dec << ',' << size
                           << ",0x" << std::hex << static_cast<std::uint64_t>(value)
-                          << ",0x" << rsi << ",0x" << rdi << std::dec << '\\n';
+                          << ",0x" << rsi << ",0x" << rdi << std::dec << '\n';
     }
 
     void remove_watch() {
         if (write_hook_) {
             const auto result = uc_hook_del(context_->get_uc(), write_hook_);
             if (result != UC_ERR_OK) {
-                std::cerr << "[MUFLEX_V14] output write watch removal failed: " << uc_strerror(result) << '\\n';
+                std::cerr << "[MUFLEX_V14] output write watch removal failed: " << uc_strerror(result) << '\n';
             }
             write_hook_ = 0;
         }
