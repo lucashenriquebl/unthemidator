@@ -55,3 +55,21 @@ Se os arquivos `GameServer.prelude.*` não aparecerem, verifique se o EXE novo f
 ## Testes
 
 A workflow `.github/workflows/build-windows-msbuild.yml` compila Release x64 e executa somente `unthemidator.exe --help`, nunca os executáveis protegidos. O runner Windows 2025/VS2026 do CI e o script local utilizam Visual Studio 2026; a compilação é realizada pelo MSBuild.
+
+## V15: resultado da captura real e próximo experimento
+
+A execução na VM produziu snapshots de 8192 bytes com leitura Unicorn bem-sucedida nas duas páginas. A página imediatamente anterior à seção `.themida` não mudou; os dois bytes na suposta origem LZ (RVA `0xA34EF5B`) são `00 00` antes e depois. A região de destino (RVA `0xA34F022`) mudou de `00 00` para `49 81`. O CSV de observação daquela origem teve **zero eventos**. Isso não valida a cópia suposta pelo decodificador experimental offline V10, cuja primeira diferença é `0x22`.
+
+**Novo instrumento:** o mesmo executável, quando reconstruído a partir desta branch atualizada, passa a criar também `GameServer.prelude.LZ_WRITES.csv`, com eventos de escrita do Unicorn nos primeiros **512 bytes** da `.themida` (limite de 4096 eventos), endereço da instrução RIP, tamanho da escrita, valor de até 64 bits e registradores RSI/RDI. O observador da origem continua disponível no arquivo `LZ_READS.csv`.
+
+Após atualizar a branch, **recompile** para incluir o novo instrumento:
+
+```powershell
+cd C:\S21Lab\unthemidator-v14
+git pull origin fix/muflex-v14-stage0-capture-msbuild
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-v14-vs2026.ps1
+```
+
+Execute novamente o comando de captura da seção 3, sem iniciar o GameServer diretamente. Envie prioritariamente `GameServer.prelude.LZ_WRITES.csv` e o log. O objetivo é descobrir **qual RIP realmente escreveu** os bytes `49 81` no deslocamento `0x22` da saída. Ausência de eventos também é resultado técnico que deverá ser investigado.
+
+**Não confunda Stage0, que ainda contém código protegido, com GameServer totalmente desempacotado.**
