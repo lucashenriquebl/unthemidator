@@ -21,6 +21,7 @@
 #include "../emulator/c_emulator_ctx.hpp"
 #include "../memory/c_memory_manager.hpp"
 #include "../pe/c_pe_image.hpp"
+#include "muflex_runtime_hotspot.hpp"
 
 namespace muflex {
 
@@ -33,7 +34,7 @@ public:
                   const std::uint64_t budget)
         : image_(image), context_(context),
           image_base_(memory->get_image_base()), image_size_(memory->get_image_size()), output_(directory),
-          budget_(budget) {}
+          hotspot_(image, context, memory->get_image_base(), directory), budget_(budget) {}
 
     runtime_probe(const runtime_probe&) = delete;
     runtime_probe& operator=(const runtime_probe&) = delete;
@@ -58,6 +59,7 @@ public:
             return false;
         }
         image_writes_ << "write_index,instruction_index,pc,pc_rva,dest_va,dest_rva,dest_region,page_rva,size,value_low64_hex\n";
+        hotspot_.begin();
 
         const auto result = uc_hook_add(context_->get_uc(), &hook_, UC_HOOK_CODE,
                            reinterpret_cast<void*>(&runtime_probe::on_code), this, 1, 0);
@@ -86,6 +88,7 @@ public:
         detach();
         if (trace_) trace_.flush();
         if (image_writes_) image_writes_.flush();
+        hotspot_.finish();
 
         std::ofstream summary(output_ / "runtime_summary.txt", std::ios::trunc);
         if (!summary) {
@@ -109,7 +112,12 @@ public:
                     (startup_returned ? "startup_returned" : "startup_exception_or_unknown")) << "\n"
                 << "image_write_events=" << total_image_writes_ << "\n"
                 << "image_write_rows=" << write_rows_ << "\n"
-                << "distinct_image_pages_written=" << page_counts_.size() << "\n";
+                << "distinct_image_pages_written=" << page_counts_.size() << "\n"
+                << "hotspot_enabled=" << (hotspot_.enabled() ? "true" : "false") << "\n"
+                << "hotspot_guest_writes=" << hotspot_.write_count() << "\n"
+                << "hotspot_distinct_keys=" << hotspot_.distinct_keys() << "\n"
+                << "hotspot_dropped_key_events=" << hotspot_.dropped_keys() << "\n"
+                << "hotspot_changed_bytes=" << hotspot_.changed_bytes() << "\n";
         for (const auto& [region, count] : region_counts_) {
             summary << "instructions_in_" << sanitize(region) << "=" << count << '\n';
         }
@@ -172,6 +180,13 @@ private:
                           std::int64_t value, void* user_data) {
         auto* self = static_cast<runtime_probe*>(user_data);
         if (!self || !self->started_ || type != UC_MEM_WRITE || size <= 0) return;
+        if (self->hotspot_.enabled()) {
+            const auto hot_va = self->image_base_ + muflex::runtime_hotspot::k_hotspot_rva;
+            if (address >= hot_va && address < hot_va + muflex::runtime_hotspot::k_page_size) {
+                self->hotspot_.observe_write(self->observed_, self->context_->get_pc(),
+                                             address, size, static_cast<std::uint64_t>(value));
+            }
+        }
         self->observe_write(uc, address, size, value);
     }
 
@@ -267,6 +282,7 @@ private:
     std::uint64_t image_base_ = 0;
     std::uint64_t image_size_ = 0;
     std::filesystem::path output_;
+    muflex::runtime_hotspot hotspot_;
     std::ofstream trace_;
     std::ofstream image_writes_;
     std::map<std::string, std::uint64_t> write_region_counts_;
