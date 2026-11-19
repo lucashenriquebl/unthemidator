@@ -73,7 +73,7 @@ if (-not (Test-Path -LiteralPath $MSBuild -PathType Leaf)) {
 }
 
 # Visual Studio 18 2026 was added as a CMake generator in CMake 4.2.
-# CMake 4.0/4.1 can still compile the same MSVC sources via Ninja.
+# CMake 3.31/4.1 can still compile the same MSVC sources via Ninja.
 $Candidates = @()
 $PathCMake = Get-Command cmake.exe -ErrorAction SilentlyContinue
 if ($PathCMake) { $Candidates += $PathCMake.Source }
@@ -87,7 +87,7 @@ foreach ($Candidate in ($Candidates | Select-Object -Unique)) {
         continue
     }
     $VersionText = $Matches[1]
-    if ([version]$VersionText -lt [version]"4.0") {
+    if ([version]$VersionText -lt [version]"3.31") {
         Write-Host "Ignorando CMake antigo: $Candidate ($VersionText)" -ForegroundColor Yellow
         continue
     }
@@ -105,7 +105,7 @@ foreach ($Candidate in ($Candidates | Select-Object -Unique)) {
 }
 
 if (-not $CMakeNinja) {
-    throw "CMake 4.0+ nao encontrado. O CMakeLists.txt exige 4.0+. Execute cmake --version e instale CMake 4.2+."
+    throw "CMake 3.31+ nao encontrado. O CMakeLists.txt exige 4.0+. Execute cmake --version e instale CMake 4.2+."
 }
 
 $ExeDir = Join-Path $Build "Release"
