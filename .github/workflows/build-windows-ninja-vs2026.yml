@@ -32,6 +32,8 @@ jobs:
           & $cmakeExe --version
           # Put the already installed CMake on PATH; the build script must discover it.
           $env:Path = "$cmakeBin;$env:Path"
+          # Regression: absent optional Chocolatey environment must not crash Test-Path.
+          Remove-Item Env:ChocolateyInstall -ErrorAction SilentlyContinue
           $vswhere = Join-Path ([Environment]::GetFolderPath("ProgramFilesX86")) "Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -requires Microsoft.Component.MSBuild -property installationPath
           if (-not $vsPath) { throw "Visual Studio 2026 with MSBuild not found" }
