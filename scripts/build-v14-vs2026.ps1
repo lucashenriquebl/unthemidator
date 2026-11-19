@@ -93,6 +93,11 @@ function Add-CMakeCandidate([string] $Path) {
     }
 }
 
+function Get-OptionalChildPath([string] $Base, [string] $Child) {
+    if ([string]::IsNullOrWhiteSpace($Base)) { return $null }
+    return (Join-Path $Base $Child)
+}
+
 if ($CMakeExecutable) {
     Add-CMakeCandidate $CMakeExecutable
     if ($Candidates.Count -eq 0) {
@@ -115,21 +120,21 @@ else {
     # Visual Studio's bundled CMake and common standalone installer locations.
     foreach ($Extra in @(
         $VSCMake,
-        (Join-Path $env:ProgramFiles "CMake\bin\cmake.exe"),
-        (Join-Path $ProgramFilesX86 "CMake\bin\cmake.exe"),
-        (Join-Path $env:LOCALAPPDATA "Programs\CMake\bin\cmake.exe"),
-        (Join-Path $env:LOCALAPPDATA "CMake\bin\cmake.exe"),
-        (Join-Path $env:ChocolateyInstall "bin\cmake.exe"),
-        (Join-Path $env:USERPROFILE "scoop\apps\cmake\current\bin\cmake.exe"),
-        (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\cmake.exe")
+        (Get-OptionalChildPath $env:ProgramFiles "CMake\bin\cmake.exe"),
+        (Get-OptionalChildPath $ProgramFilesX86 "CMake\bin\cmake.exe"),
+        (Get-OptionalChildPath $env:LOCALAPPDATA "Programs\CMake\bin\cmake.exe"),
+        (Get-OptionalChildPath $env:LOCALAPPDATA "CMake\bin\cmake.exe"),
+        (Get-OptionalChildPath $env:ChocolateyInstall "bin\cmake.exe"),
+        (Get-OptionalChildPath $env:USERPROFILE "scoop\apps\cmake\current\bin\cmake.exe"),
+        (Get-OptionalChildPath $env:LOCALAPPDATA "Microsoft\WinGet\Links\cmake.exe")
     )) {
         Add-CMakeCandidate $Extra
     }
 
     # Chocolatey and WinGet versioned package folders.
     $PackageFolders = @(
-        (Join-Path $env:ChocolateyInstall "lib\cmake\tools"),
-        (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages")
+        (Get-OptionalChildPath $env:ChocolateyInstall "lib\cmake\tools"),
+        (Get-OptionalChildPath $env:LOCALAPPDATA "Microsoft\WinGet\Packages")
     )
     foreach ($Folder in $PackageFolders) {
         if (Test-Path -LiteralPath $Folder -PathType Container) {
