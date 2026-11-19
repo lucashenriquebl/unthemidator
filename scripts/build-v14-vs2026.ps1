@@ -171,12 +171,29 @@ $CMakeNinja = $null
 $RejectedCMake = @()
 
 foreach ($Candidate in $Candidates) {
-    $VersionLine = (& $Candidate --version 2>&1 | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or $VersionLine -notmatch 'cmake version (\d+\.\d+(?:\.\d+)?)') {
-        $RejectedCMake += "$Candidate (nao foi possivel ler a versao)"
+    # Windows PowerShell 5.1 may stop the native process early with
+    # Select-Object -First 1 (closed stdout pipe), leaving a nonzero exit code.
+    # Consume the entire cmake --version output before reading LASTEXITCODE.
+    $VersionOutput = ""
+    $VersionExitCode = -1
+    try {
+        $VersionOutput = (& $Candidate --version 2>&1 | Out-String)
+        $VersionExitCode = $LASTEXITCODE
+    }
+    catch {
+        $RejectedCMake += "$Candidate (erro ao executar: $($_.Exception.Message))"
         continue
     }
-    $VersionText = $Matches[1]
+
+    $VersionMatch = [regex]::Match([string]$VersionOutput,
+        '(?im)^\s*cmake\s+version\s+(\d+\.\d+(?:\.\d+)?)\b')
+    if ($VersionExitCode -ne 0 -or -not $VersionMatch.Success) {
+        $Summary = ([string]$VersionOutput).Trim() -replace '\s+', ' '
+        if ($Summary.Length -gt 160) { $Summary = $Summary.Substring(0, 160) }
+        $RejectedCMake += "$Candidate (exit $VersionExitCode; saida: $Summary)"
+        continue
+    }
+    $VersionText = $VersionMatch.Groups[1].Value
     if ([version]$VersionText -lt [version]"3.31") {
         $RejectedCMake += "$Candidate (versao $VersionText; minimo 3.31)"
         continue
