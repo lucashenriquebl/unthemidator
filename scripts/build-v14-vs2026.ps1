@@ -3,7 +3,9 @@
 # Does not run or load a protected GameServer executable.
 param(
     [string] $Source = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
-    [string] $VS = "C:\Program Files\Microsoft Visual Studio\18\Community"
+    [string] $VS = "C:\Program Files\Microsoft Visual Studio\18\Community",
+    [string] $CMakeExecutable = "",
+    [switch] $ForceNinja
 )
 
 $ErrorActionPreference = "Stop"
@@ -75,9 +77,16 @@ if (-not (Test-Path -LiteralPath $MSBuild -PathType Leaf)) {
 # Visual Studio 18 2026 was added as a CMake generator in CMake 4.2.
 # CMake 3.31/4.1 can still compile the same MSVC sources via Ninja.
 $Candidates = @()
-$PathCMake = Get-Command cmake.exe -ErrorAction SilentlyContinue
-if ($PathCMake) { $Candidates += $PathCMake.Source }
-if (Test-Path -LiteralPath $VSCMake -PathType Leaf) { $Candidates += $VSCMake }
+if ($CMakeExecutable) {
+    if (-not (Test-Path -LiteralPath $CMakeExecutable -PathType Leaf)) {
+        throw "CMake personalizado nao encontrado: $CMakeExecutable"
+    }
+    $Candidates += (Resolve-Path -LiteralPath $CMakeExecutable).Path
+} else {
+    $PathCMake = Get-Command cmake.exe -ErrorAction SilentlyContinue
+    if ($PathCMake) { $Candidates += $PathCMake.Source }
+    if (Test-Path -LiteralPath $VSCMake -PathType Leaf) { $Candidates += $VSCMake }
+}
 
 $CMakeVS = $null
 $CMakeNinja = $null
@@ -94,7 +103,7 @@ foreach ($Candidate in ($Candidates | Select-Object -Unique)) {
     if (-not $CMakeNinja) { $CMakeNinja = $Candidate }
 
     # CMake --help includes the generator name only when actually supported.
-    if ([version]$VersionText -ge [version]"4.2") {
+    if (-not $ForceNinja -and [version]$VersionText -ge [version]"4.2") {
         $HelpText = (& $Candidate --help | Out-String)
         if ($LASTEXITCODE -eq 0 -and $HelpText.Contains("Visual Studio 18 2026")) {
             $CMakeVS = $Candidate
