@@ -1,4 +1,4 @@
-name: Visual Studio 2026 Ninja fallback (CMake 3.31)
+name: Visual Studio 2026 installed CMake (PowerShell 5.1)
 
 on:
   pull_request:
@@ -10,7 +10,12 @@ on:
 
 jobs:
   windows-msvc-ninja:
+    name: "Windows PowerShell 5.1 / CMake ${{ matrix.cmake }}"
     runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        cmake: ["3.31.6", "4.4.5"]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,10 +25,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install CMake 3.31.6 (no Visual Studio 18 generator)
-        run: python -m pip install "cmake==3.31.6"
+      - name: Install test CMake on PATH (do not download from the build script)
+        run: python -m pip install "cmake==${{ matrix.cmake }}"
 
-      - name: Compile with VS2026 MSVC and Ninja fallback
+      - name: Compile using installed CMake under Windows PowerShell 5.1
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -37,7 +42,9 @@ jobs:
           $vswhere = Join-Path ([Environment]::GetFolderPath("ProgramFilesX86")) "Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -requires Microsoft.Component.MSBuild -property installationPath
           if (-not $vsPath) { throw "Visual Studio 2026 with MSBuild not found" }
-          & .\scripts\build-v14-vs2026.ps1 -Source $PWD.Path -VS $vsPath -ForceNinja
+          # Reproduce the user environment: powershell.exe 5.1, not pwsh 7.
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-v14-vs2026.ps1 -Source $PWD.Path -VS $vsPath
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell 5.1 build failed ($LASTEXITCODE)" }
           if (-not (Test-Path .\build\Release\unthemidator.exe)) { throw "Ninja output missing in build\Release" }
 
       - name: Smoke test CLI
