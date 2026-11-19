@@ -1,11 +1,12 @@
-# Build MuFlex diagnostics with Visual Studio 2026 and CMake >= 4.0.
+# Build MuFlex diagnostics with Visual Studio 2026 and CMake >= 3.31.
 # Automatically initializes missing Git submodules in a real Git checkout.
 # Does not run or load a protected GameServer executable.
 param(
     [string] $Source = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
     [string] $VS = "C:\Program Files\Microsoft Visual Studio\18\Community",
     [string] $CMakeExecutable = "",
-    [switch] $ForceNinja
+    [switch] $ForceNinja,
+    [switch] $ForceCMakeBootstrap
 )
 
 $ErrorActionPreference = "Stop"
@@ -75,7 +76,7 @@ if (-not (Test-Path -LiteralPath $MSBuild -PathType Leaf)) {
 }
 
 # Visual Studio 18 2026 was added as a CMake generator in CMake 4.2.
-# CMake 3.31/4.1 can still compile the same MSVC sources via Ninja.
+# CMake 3.31-4.1 can still compile the same MSVC sources via Ninja.
 $Candidates = @()
 if ($CMakeExecutable) {
     if (-not (Test-Path -LiteralPath $CMakeExecutable -PathType Leaf)) {
@@ -86,6 +87,19 @@ if ($CMakeExecutable) {
     $PathCMake = Get-Command cmake.exe -ErrorAction SilentlyContinue
     if ($PathCMake) { $Candidates += $PathCMake.Source }
     if (Test-Path -LiteralPath $VSCMake -PathType Leaf) { $Candidates += $VSCMake }
+    # Also check common system and per-user installations not registered on PATH.
+    foreach ($Extra in @(
+        "C:\Program Files\CMake\bin\cmake.exe",
+        (Join-Path $env:LOCALAPPDATA "Programs\CMake\bin\cmake.exe"),
+        (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\cmake.exe")
+    )) {
+        if ($Extra -and (Test-Path -LiteralPath $Extra -PathType Leaf)) { $Candidates += $Extra }
+    }
+}
+
+if ($ForceCMakeBootstrap) {
+    Write-Host "Executando teste de instalacao local automatica do CMake" -ForegroundColor Cyan
+    $Candidates = @()
 }
 
 $CMakeVS = $null
@@ -114,7 +128,33 @@ foreach ($Candidate in ($Candidates | Select-Object -Unique)) {
 }
 
 if (-not $CMakeNinja) {
-    throw "CMake 3.31+ nao encontrado. O CMakeLists.txt exige 4.0+. Execute cmake --version e instale CMake 4.2+."
+    if ($CMakeExecutable) {
+        throw "CMake informado em -CMakeExecutable e incompatível com o mínimo 3.31: $CMakeExecutable"
+    }
+
+    # Reuse/download an official versioned CMake with SHA-256 verification.
+    # No administrator privileges, global installation, or PATH editing.
+    $Installer = Join-Path $PSScriptRoot "ensure-cmake-vs2026.ps1"
+    if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) {
+        throw "Script de preparacao do CMake ausente: $Installer"
+    }
+    $Portable = (& $Installer | Select-Object -Last 1)
+    if (-not $Portable -or -not (Test-Path -LiteralPath $Portable -PathType Leaf)) {
+        throw "A preparacao automatica do CMake nao retornou um executavel valido."
+    }
+    $VersionLine = (& $Portable --version | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or $VersionLine -notmatch 'cmake version (\d+\.\d+(?:\.\d+)?)') {
+        throw "CMake portatil nao iniciou corretamente: $Portable"
+    }
+    $CMakeNinja = $Portable
+    Write-Host "Utilizando CMake portatil: $Portable ($($Matches[1]))" -ForegroundColor Green
+
+    if (-not $ForceNinja) {
+        $HelpText = (& $Portable --help | Out-String)
+        if ($LASTEXITCODE -eq 0 -and $HelpText.Contains("Visual Studio 18 2026")) {
+            $CMakeVS = $Portable
+        }
+    }
 }
 
 $ExeDir = Join-Path $Build "Release"

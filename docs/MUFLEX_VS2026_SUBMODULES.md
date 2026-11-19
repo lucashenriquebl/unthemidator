@@ -38,6 +38,47 @@ Clone into a fresh directory without destroying current files:
     git clone --recurse-submodules https://github.com/lucashenriquebl/unthemidator.git C:\S21Lab\unthemidator-git
     powershell -NoProfile -ExecutionPolicy Bypass -File C:\S21Lab\unthemidator-git\scripts\build-v14-vs2026.ps1
 
+## Automatic CMake recovery (Visual Studio 2026)
+
+If PowerShell shows "CMake 3.31+ nao encontrado", this means the build
+script could not locate a compatible CMake in its detected paths; it does
+**not** prove that Visual Studio or CMake is uninstalled.
+
+The build now checks CMake on PATH, in Visual Studio, and in several common
+Windows installation directories. When none is suitable, it downloads the
+official portable Kitware **CMake 4.2.6** from GitHub Releases. It verifies
+the ZIP's SHA-256 against the official release checksum list, extracts it to
+the current user's LocalAppData, and uses it directly. No administrator
+permission or global PATH modification is required.
+
+Default cache location:
+
+    %LOCALAPPDATA%\MuFlex\Tools\CMake\cmake-4.2.6-windows-x86_64\bin\cmake.exe
+
+After merging the PR, update your Git checkout and execute the same command:
+
+    cd C:\S21Lab\unthemidator-git
+    git switch master
+    git pull origin master
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-v14-vs2026.ps1
+
+The first run needs access to github.com/Kitware/CMake/releases. If the
+download is blocked, the error gives the underlying failure. Alternatively,
+download CMake 4.2.6 manually and supply its full cmake.exe path with
+-CMakeExecutable.
+
+The project still supports CMake 3.31+ with Ninja/MSVC; the automatic
+fallback installs 4.2.6, which includes the VS2026 generator.
+
+## Manual diagnostics
+
+    Get-Command cmake.exe -All -ErrorAction SilentlyContinue
+    cmake --version
+    Test-Path "C:\Program Files\CMake\bin\cmake.exe"
+
+For testing the auto-install path on CI or your VM, pass
+-ForceCMakeBootstrap (downloads are cached by version).
+
 ## CMake and MSBuild — VS2026
 
 A previous build script incorrectly accepted CMake 4.0 but demanded the
