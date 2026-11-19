@@ -102,6 +102,7 @@ public:
         // Reading the whole instruction is unnecessary; no PE dump is generated.
         std::uint32_t overlap = 0;
         const page_state* first_written = nullptr;
+        std::uint64_t first_written_page_va = 0;
         const auto inspect_size = std::min<std::uint32_t>(size, 15);
         for (std::uint32_t offset = 0; offset < inspect_size; ++offset) {
             const auto byte_pc = pc + offset;
@@ -109,13 +110,16 @@ public:
             if (it == written_pages_.end()) continue;
             if (it->second.bytes_written.test(static_cast<std::size_t>(byte_pc & 0xfff))) {
                 ++overlap;
-                if (!first_written) first_written = &it->second;
+                if (!first_written) {
+                    first_written = &it->second;
+                    first_written_page_va = it->first;
+                }
             }
         }
         if (overlap) {
             ++window_.executions_overlapping_written_bytes;
             ++exact_overlap_events_;
-            auto& ps = written_pages_[pc & ~std::uint64_t{0xfff}];
+            auto& ps = written_pages_.at(first_written_page_va);
             ++ps.exec_written_byte_events;
             if (!ps.first_exec_instruction) {
                 ps.first_exec_instruction = idx;
