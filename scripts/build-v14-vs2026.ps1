@@ -1,12 +1,11 @@
-# Build MuFlex diagnostics with Visual Studio 2026 and CMake >= 3.31.
-# Automatically initializes missing Git submodules in a real Git checkout.
+# Build MuFlex diagnostics with Visual Studio 2026 using an already installed CMake >= 3.31.
+# Never downloads or installs CMake. Automatically initializes missing Git submodules.
 # Does not run or load a protected GameServer executable.
 param(
     [string] $Source = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
     [string] $VS = "C:\Program Files\Microsoft Visual Studio\18\Community",
     [string] $CMakeExecutable = "",
-    [switch] $ForceNinja,
-    [switch] $ForceCMakeBootstrap
+    [switch] $ForceNinja
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,84 +76,131 @@ if (-not (Test-Path -LiteralPath $MSBuild -PathType Leaf)) {
 
 # Visual Studio 18 2026 was added as a CMake generator in CMake 4.2.
 # CMake 3.31-4.1 can still compile the same MSVC sources via Ninja.
+# Use only a CMake installation already present on this machine.
+# Search PATH, Visual Studio, standard install locations, package managers,
+# and Windows uninstall registry entries. Never download or install CMake.
 $Candidates = @()
-if ($CMakeExecutable) {
-    if (-not (Test-Path -LiteralPath $CMakeExecutable -PathType Leaf)) {
-        throw "CMake personalizado nao encontrado: $CMakeExecutable"
+$ProgramFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+
+function Add-CMakeCandidate([string] $Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    $Expanded = [Environment]::ExpandEnvironmentVariables($Path.Trim('"'))
+    if (Test-Path -LiteralPath $Expanded -PathType Container) {
+        $Expanded = Join-Path $Expanded "bin\cmake.exe"
     }
-    $Candidates += (Resolve-Path -LiteralPath $CMakeExecutable).Path
-} else {
-    $PathCMake = Get-Command cmake.exe -ErrorAction SilentlyContinue
-    if ($PathCMake) { $Candidates += $PathCMake.Source }
-    if (Test-Path -LiteralPath $VSCMake -PathType Leaf) { $Candidates += $VSCMake }
-    # Also check common system and per-user installations not registered on PATH.
+    if (Test-Path -LiteralPath $Expanded -PathType Leaf) {
+        $script:Candidates += (Resolve-Path -LiteralPath $Expanded).Path
+    }
+}
+
+if ($CMakeExecutable) {
+    Add-CMakeCandidate $CMakeExecutable
+    if ($Candidates.Count -eq 0) {
+        throw "CMake informado em -CMakeExecutable nao existe: $CMakeExecutable. Informe o caminho completo ate cmake.exe."
+    }
+}
+else {
+    # Current process PATH (including entries added by the CMake installer).
+    foreach ($Command in @(Get-Command cmake.exe -All -ErrorAction SilentlyContinue)) {
+        if ($Command.Source) { Add-CMakeCandidate $Command.Source }
+        elseif ($Command.Path) { Add-CMakeCandidate $Command.Path }
+    }
+
+    # where.exe also resolves PATH entries when Get-Command returns wrappers.
+    $WhereExe = Join-Path $env:SystemRoot "System32\where.exe"
+    if (Test-Path -LiteralPath $WhereExe) {
+        foreach ($Found in @(& $WhereExe cmake.exe 2>$null)) { Add-CMakeCandidate $Found }
+    }
+
+    # Visual Studio's bundled CMake and common standalone installer locations.
     foreach ($Extra in @(
-        "C:\Program Files\CMake\bin\cmake.exe",
+        $VSCMake,
+        (Join-Path $env:ProgramFiles "CMake\bin\cmake.exe"),
+        (Join-Path $ProgramFilesX86 "CMake\bin\cmake.exe"),
         (Join-Path $env:LOCALAPPDATA "Programs\CMake\bin\cmake.exe"),
+        (Join-Path $env:LOCALAPPDATA "CMake\bin\cmake.exe"),
+        (Join-Path $env:ChocolateyInstall "bin\cmake.exe"),
+        (Join-Path $env:USERPROFILE "scoop\apps\cmake\current\bin\cmake.exe"),
         (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\cmake.exe")
     )) {
-        if ($Extra -and (Test-Path -LiteralPath $Extra -PathType Leaf)) { $Candidates += $Extra }
+        Add-CMakeCandidate $Extra
+    }
+
+    # Chocolatey and WinGet versioned package folders.
+    $PackageFolders = @(
+        (Join-Path $env:ChocolateyInstall "lib\cmake\tools"),
+        (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages")
+    )
+    foreach ($Folder in $PackageFolders) {
+        if (Test-Path -LiteralPath $Folder -PathType Container) {
+            foreach ($Found in @(Get-ChildItem -LiteralPath $Folder -Filter cmake.exe -File -Recurse -ErrorAction SilentlyContinue)) {
+                Add-CMakeCandidate $Found.FullName
+            }
+        }
+    }
+
+    # Read install locations registered by the official installer or package manager.
+    $RegistryRoots = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+    )
+    foreach ($RegistryRoot in $RegistryRoots) {
+        if (Test-Path -LiteralPath $RegistryRoot) {
+            foreach ($Entry in @(Get-ChildItem -LiteralPath $RegistryRoot -ErrorAction SilentlyContinue)) {
+                $Properties = Get-ItemProperty -LiteralPath $Entry.PSPath -ErrorAction SilentlyContinue
+                if ($Properties.DisplayName -match '(?i)^CMake(?:\s|$)' -and $Properties.InstallLocation) {
+                    Add-CMakeCandidate $Properties.InstallLocation
+                }
+            }
+        }
     }
 }
 
-if ($ForceCMakeBootstrap) {
-    Write-Host "Executando teste de instalacao local automatica do CMake" -ForegroundColor Cyan
-    $Candidates = @()
-}
-
+$Candidates = @($Candidates | Select-Object -Unique)
 $CMakeVS = $null
 $CMakeNinja = $null
-foreach ($Candidate in ($Candidates | Select-Object -Unique)) {
-    $VersionLine = (& $Candidate --version | Select-Object -First 1)
+$RejectedCMake = @()
+
+foreach ($Candidate in $Candidates) {
+    $VersionLine = (& $Candidate --version 2>&1 | Select-Object -First 1)
     if ($LASTEXITCODE -ne 0 -or $VersionLine -notmatch 'cmake version (\d+\.\d+(?:\.\d+)?)') {
+        $RejectedCMake += "$Candidate (nao foi possivel ler a versao)"
         continue
     }
     $VersionText = $Matches[1]
     if ([version]$VersionText -lt [version]"3.31") {
-        Write-Host "Ignorando CMake antigo: $Candidate ($VersionText)" -ForegroundColor Yellow
+        $RejectedCMake += "$Candidate (versao $VersionText; minimo 3.31)"
         continue
     }
-    if (-not $CMakeNinja) { $CMakeNinja = $Candidate }
 
-    # CMake --help includes the generator name only when actually supported.
+    if (-not $CMakeNinja) { $CMakeNinja = $Candidate }
+    Write-Host "CMake instalado encontrado: $Candidate ($VersionText)" -ForegroundColor Green
+
+    # CMake 4.2+ advertises the native Visual Studio 18 2026 generator.
     if (-not $ForceNinja -and [version]$VersionText -ge [version]"4.2") {
-        $HelpText = (& $Candidate --help | Out-String)
+        $HelpText = (& $Candidate --help 2>&1 | Out-String)
         if ($LASTEXITCODE -eq 0 -and $HelpText.Contains("Visual Studio 18 2026")) {
             $CMakeVS = $Candidate
-            Write-Host "CMake $VersionText com gerador Visual Studio 2026: $CMakeVS" -ForegroundColor Cyan
+            Write-Host "Gerador Visual Studio 2026 disponivel." -ForegroundColor Cyan
             break
         }
     }
 }
 
 if (-not $CMakeNinja) {
-    if ($CMakeExecutable) {
-        throw "CMake informado em -CMakeExecutable e incompatível com o mínimo 3.31: $CMakeExecutable"
-    }
-
-    # Reuse/download an official versioned CMake with SHA-256 verification.
-    # No administrator privileges, global installation, or PATH editing.
-    $Installer = Join-Path $PSScriptRoot "ensure-cmake-vs2026.ps1"
-    if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) {
-        throw "Script de preparacao do CMake ausente: $Installer"
-    }
-    $Portable = (& $Installer | Select-Object -Last 1)
-    if (-not $Portable -or -not (Test-Path -LiteralPath $Portable -PathType Leaf)) {
-        throw "A preparacao automatica do CMake nao retornou um executavel valido."
-    }
-    $VersionLine = (& $Portable --version | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or $VersionLine -notmatch 'cmake version (\d+\.\d+(?:\.\d+)?)') {
-        throw "CMake portatil nao iniciou corretamente: $Portable"
-    }
-    $CMakeNinja = $Portable
-    Write-Host "Utilizando CMake portatil: $Portable ($($Matches[1]))" -ForegroundColor Green
-
-    if (-not $ForceNinja) {
-        $HelpText = (& $Portable --help | Out-String)
-        if ($LASTEXITCODE -eq 0 -and $HelpText.Contains("Visual Studio 18 2026")) {
-            $CMakeVS = $Portable
-        }
-    }
+    $RejectedText = if ($RejectedCMake.Count -gt 0) { ([Environment]::NewLine + "Candidatos encontrados:" + [Environment]::NewLine + " - " + ($RejectedCMake -join ([Environment]::NewLine + " - "))) } else { "Nenhum cmake.exe foi localizado." }
+    throw @"
+CMake 3.31 ou superior nao foi encontrado na instalacao local.
+O script NAO baixa nem instala o CMake.
+Abra um novo PowerShell apos instalar o CMake, ou informe o caminho exato:
+  .\scripts\build-v14-vs2026.ps1 -CMakeExecutable "C:\Program Files\CMake\bin\cmake.exe"
+Para conferir a instalacao:
+  Get-Command cmake.exe -All
+  where.exe cmake
+  cmake --version
+$RejectedText
+"@
 }
 
 $ExeDir = Join-Path $Build "Release"
