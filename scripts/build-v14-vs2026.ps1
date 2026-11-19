@@ -69,55 +69,121 @@ Clone o repositorio com os submodulos e compile na copia clonada:
 }
 
 if (-not (Test-Path -LiteralPath $MSBuild -PathType Leaf)) {
-    throw "MSBuild do Visual Studio 2026 nao encontrado em: $MSBuild. Use -VS para indicar a pasta de instalacao."
+    throw "MSBuild do Visual Studio 2026 nao encontrado: $MSBuild. Informe -VS com a instalacao correta."
 }
 
-# Prefer the user's CMake installed on PATH, then Visual Studio's bundled CMake.
-# The project's CMakeLists.txt currently requires CMake 4.0 or newer.
+# Visual Studio 18 2026 was added as a CMake generator in CMake 4.2.
+# CMake 4.0/4.1 can still compile the same MSVC sources via Ninja.
 $Candidates = @()
-$PathCMake = Get-Command cmake -ErrorAction SilentlyContinue
+$PathCMake = Get-Command cmake.exe -ErrorAction SilentlyContinue
 if ($PathCMake) { $Candidates += $PathCMake.Source }
 if (Test-Path -LiteralPath $VSCMake -PathType Leaf) { $Candidates += $VSCMake }
-$CMake = $null
+
+$CMakeVS = $null
+$CMakeNinja = $null
 foreach ($Candidate in ($Candidates | Select-Object -Unique)) {
     $VersionLine = (& $Candidate --version | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or $VersionLine -notmatch 'cmake version (\d+\.\d+(?:\.\d+)?)') { continue }
+    if ($LASTEXITCODE -ne 0 -or $VersionLine -notmatch 'cmake version (\d+\.\d+(?:\.\d+)?)') {
+        continue
+    }
     $VersionText = $Matches[1]
-    if ([version]$VersionText -lt [version]"4.0") { continue }
+    if ([version]$VersionText -lt [version]"4.0") {
+        Write-Host "Ignorando CMake antigo: $Candidate ($VersionText)" -ForegroundColor Yellow
+        continue
+    }
+    if (-not $CMakeNinja) { $CMakeNinja = $Candidate }
 
-    $HelpText = (& $Candidate --help | Out-String)
-    if ($LASTEXITCODE -ne 0 -or $HelpText -notmatch "Visual Studio 18 2026") { continue }
-
-    $CMake = $Candidate
-    Write-Host "CMake encontrado: $CMake ($VersionText)" -ForegroundColor Cyan
-    break
+    # CMake --help includes the generator name only when actually supported.
+    if ([version]$VersionText -ge [version]"4.2") {
+        $HelpText = (& $Candidate --help | Out-String)
+        if ($LASTEXITCODE -eq 0 -and $HelpText.Contains("Visual Studio 18 2026")) {
+            $CMakeVS = $Candidate
+            Write-Host "CMake $VersionText com gerador Visual Studio 2026: $CMakeVS" -ForegroundColor Cyan
+            break
+        }
+    }
 }
-if (-not $CMake) {
-    throw "CMake 4.0+ com gerador 'Visual Studio 18 2026' nao encontrado. Instale/atualize o CMake e verifique cmake --version e cmake --help."
+
+if (-not $CMakeNinja) {
+    throw "CMake 4.0+ nao encontrado. O CMakeLists.txt exige 4.0+. Execute cmake --version e instale CMake 4.2+."
 }
 
-if (-not (Test-Path -LiteralPath $Build)) {
+$ExeDir = Join-Path $Build "Release"
+$Exe = Join-Path $ExeDir "unthemidator.exe"
+
+if ($CMakeVS) {
+    # Native Visual Studio generator: preserve the existing .sln/MSBuild path.
     New-Item -ItemType Directory -Path $Build -Force | Out-Null
-}
+    $Cache = Join-Path $Build "CMakeCache.txt"
+    if (Test-Path -LiteralPath $Cache) {
+        $CachedGenerator = Get-Content -LiteralPath $Cache |
+            Where-Object { $_ -like "CMAKE_GENERATOR:INTERNAL=*" } | Select-Object -First 1
+        if ($CachedGenerator -and $CachedGenerator -ne "CMAKE_GENERATOR:INTERNAL=Visual Studio 18 2026") {
+            throw "A pasta build usa outro gerador: $CachedGenerator. Mova a pasta build para um backup e execute novamente (nao apague seus arquivos)."
+        }
+    }
 
-$Solution = Get-ChildItem -LiteralPath $Build -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.Extension -in ".sln", ".slnx" } | Select-Object -First 1
+    & $CMakeVS -S $Source -B $Build -G "Visual Studio 18 2026" -A x64
+    if ($LASTEXITCODE -ne 0) { throw "CMake nao conseguiu configurar o Visual Studio 2026 (exit code $LASTEXITCODE)." }
 
-if (-not $Solution) {
-    & $CMake -S $Source -B $Build -G "Visual Studio 18 2026" -A x64
-    if ($LASTEXITCODE -ne 0) { throw "Falha ao gerar solucao com CMake (exit code $LASTEXITCODE)." }
     $Solution = Get-ChildItem -LiteralPath $Build -File |
         Where-Object { $_.Extension -in ".sln", ".slnx" } | Select-Object -First 1
+    if (-not $Solution) { throw "CMake nao gerou .sln/.slnx em $Build." }
+
+    $Log = Join-Path $Build "muflex_v14_msbuild.log"
+    & $MSBuild $Solution.FullName /t:Build /p:Configuration=Release /p:Platform=x64 /m:4 /v:minimal /fl "/flp:logfile=$Log;verbosity=normal"
+    if ($LASTEXITCODE -ne 0) { throw "MSBuild falhou. Envie o primeiro erro de: $Log" }
 }
-if (-not $Solution) { throw "Arquivo .sln/.slnx nao encontrado em $Build" }
+else {
+    # Fallback: MSVC from Visual Studio 2026 + Ninja. No VS18 CMake generator needed.
+    Write-Host "Este CMake nao oferece 'Visual Studio 18 2026'. Utilizando Ninja com o MSVC do VS2026." -ForegroundColor Yellow
+    $VsDevCmd = Join-Path $VS "Common7\Tools\VsDevCmd.bat"
+    if (-not (Test-Path -LiteralPath $VsDevCmd -PathType Leaf)) {
+        throw "VsDevCmd.bat ausente: $VsDevCmd. Instale o componente C++ Desktop no Visual Studio 2026."
+    }
+    $Ninja = $null
+    $PathNinja = Get-Command ninja.exe -ErrorAction SilentlyContinue
+    if ($PathNinja) { $Ninja = $PathNinja.Source }
+    $VSNinja = Join-Path $VS "Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
+    if (-not $Ninja -and (Test-Path -LiteralPath $VSNinja -PathType Leaf)) { $Ninja = $VSNinja }
+    if (-not $Ninja) {
+        throw "Ninja nao encontrado. Instale Ninja (ou atualize para CMake 4.2+ e use o gerador VS2026)."
+    }
 
-$Log = Join-Path $Build "muflex_v14_msbuild.log"
-& $MSBuild $Solution.FullName /t:Build /p:Configuration=Release /p:Platform=x64 /m:4 /v:minimal /fl "/flp:logfile=$Log;verbosity=normal"
-if ($LASTEXITCODE -ne 0) { throw "Build falhou. Envie o primeiro erro de: $Log" }
+    # Import the VS2026 compiler environment into the current PowerShell process.
+    $DevCommand = 'call "' + $VsDevCmd + '" -no_logo -arch=amd64 -host_arch=amd64 >nul && set'
+    $EnvLines = & $env:ComSpec /c $DevCommand
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falha ao inicializar o compilador VS2026 com VsDevCmd.bat (exit code $LASTEXITCODE)."
+    }
+    foreach ($Line in $EnvLines) {
+        if ($Line -match '^([^=]+)=(.*)$') {
+            [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], "Process")
+        }
+    }
+    if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+        throw "cl.exe nao encontrado apos VsDevCmd.bat. Instale o workload Desktop development with C++."
+    }
 
-$Exe = Join-Path $Build "Release\unthemidator.exe"
+    # Separate configuration directory avoids CMake generator-cache collisions.
+    # Output stays in build\Release, required by the V25/V26 runtime runners.
+    $NinjaBuild = Join-Path $Source "build-vs2026-ninja"
+    New-Item -ItemType Directory -Path $NinjaBuild -Force | Out-Null
+    New-Item -ItemType Directory -Path $ExeDir -Force | Out-Null
+    $NinjaLog = Join-Path $NinjaBuild "muflex_v14_ninja.log"
+
+    & $CMakeNinja -S $Source -B $NinjaBuild -G "Ninja" "-DCMAKE_BUILD_TYPE:STRING=Release" "-DCMAKE_MAKE_PROGRAM:FILEPATH=$Ninja" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY:PATH=$ExeDir"
+    if ($LASTEXITCODE -ne 0) {
+        throw "CMake/Ninja falhou ao configurar. Verifique o MSVC, o Ninja e o CMake (exit code $LASTEXITCODE)."
+    }
+
+    & $CMakeNinja --build $NinjaBuild --parallel 4 2>&1 | Tee-Object -FilePath $NinjaLog
+    if ($LASTEXITCODE -ne 0) { throw "Build Ninja/MSVC falhou. Envie o primeiro erro de: $NinjaLog" }
+    $Log = $NinjaLog
+}
+
 if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) {
-    throw "MSBuild retornou sucesso, mas EXE esta ausente: $Exe"
+    throw "Build retornou sucesso, mas EXE esta ausente: $Exe"
 }
 Write-Host "BUILD OK: $Exe" -ForegroundColor Green
 Write-Host "LOG: $Log"
