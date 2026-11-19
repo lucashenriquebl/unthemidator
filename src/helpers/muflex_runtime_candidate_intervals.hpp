@@ -219,3 +219,5 @@ private:
     bool enabled_=false;
 };
 } // namespace muflex
+
+#endif  // MUFLEX_RUNTIME_CANDIDATE_INTERVALS_HPP
