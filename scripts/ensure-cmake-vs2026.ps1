@@ -21,7 +21,8 @@ $Exe = Join-Path $InstallDir "bin\cmake.exe"
 function Test-ExpectedVersion([string] $CMakePath, [string] $ExpectedVersion) {
     if (-not (Test-Path -LiteralPath $CMakePath -PathType Leaf)) { return $false }
     $Banner = (& $CMakePath --version | Select-Object -First 1)
-    return ($LASTEXITCODE -eq 0 -and $Banner -match [regex]::Escape("cmake version $ExpectedVersion") + '(?:\s|$)')
+    $Pattern = '^cmake version ' + [regex]::Escape($ExpectedVersion) + '(?:\s|$)'
+    return ($LASTEXITCODE -eq 0 -and [bool]($Banner -match $Pattern))
 }
 
 if (Test-ExpectedVersion $Exe $Version) {
