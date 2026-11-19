@@ -26,6 +26,7 @@
 #include "muflex_runtime_coverage.hpp"
 #include "muflex_runtime_flow.hpp"
 #include "muflex_runtime_branch_probe.hpp"
+#include "muflex_runtime_export_followup.hpp"
 
 namespace muflex {
 
@@ -40,7 +41,8 @@ public:
           image_base_(memory->get_image_base()), image_size_(memory->get_image_size()), output_(directory),
           hotspot_(image, context, memory->get_image_base(), directory),
           external_(context, memory->get_image_base(), memory->get_image_size(), directory),
-          coverage_(directory), flow_(directory), branch_probe_(image,context,memory->get_image_base(),directory), budget_(budget) {}
+          coverage_(directory), flow_(directory), branch_probe_(image,context,memory->get_image_base(),directory),
+          export_followup_(directory,memory->get_image_base(),memory->get_image_size()),budget_(budget) {}
 
     runtime_probe(const runtime_probe&) = delete;
     runtime_probe& operator=(const runtime_probe&) = delete;
@@ -67,6 +69,10 @@ public:
         image_writes_ << "write_index,instruction_index,pc,pc_rva,dest_va,dest_rva,dest_region,page_rva,size,value_low64_hex\n";
         hotspot_.begin();
         branch_probe_.begin();
+        if (branch_probe_.enabled() && !export_followup_.begin()) {
+            std::cerr << "[MUFLEX_V26] cannot open follow-up CSV files\n";
+            return false;
+        }
 
         const auto result = uc_hook_add(context_->get_uc(), &hook_, UC_HOOK_CODE,
                            reinterpret_cast<void*>(&runtime_probe::on_code), this, 1, 0);
@@ -100,6 +106,7 @@ public:
         coverage_.finish();
         flow_.finish();
         branch_probe_.finish();
+        export_followup_.finish();
 
         std::ofstream summary(output_ / "runtime_summary.txt", std::ios::trunc);
         if (!summary) {
@@ -255,6 +262,7 @@ private:
         coverage_.observe(pc);
         flow_.observe(pc, size);
         branch_probe_.observe(uc, pc, observed_);
+        export_followup_.observe(uc, observed_, pc, size);
         const auto region = region_at(pc);
         ++region_counts_[region];
         const bool transition = region != last_region_;
@@ -315,6 +323,7 @@ private:
     muflex::runtime_coverage coverage_;
     muflex::runtime_flow flow_;
     muflex::runtime_branch_probe branch_probe_;
+    muflex::runtime_export_followup export_followup_;
     std::ofstream trace_;
     std::ofstream image_writes_;
     std::map<std::string, std::uint64_t> write_region_counts_;
