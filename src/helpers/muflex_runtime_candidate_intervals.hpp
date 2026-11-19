@@ -5,6 +5,7 @@
 // to the next candidate comparison. Only reads Unicorn state; never patches it.
 #include <unicorn/unicorn.h>
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
