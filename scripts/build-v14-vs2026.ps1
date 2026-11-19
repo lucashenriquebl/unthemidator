@@ -137,6 +137,9 @@ else {
         (Get-OptionalChildPath $env:LOCALAPPDATA "Microsoft\WinGet\Packages")
     )
     foreach ($Folder in $PackageFolders) {
+        # Unset optional environment variables yield $null folder entries.
+        # Test-Path -LiteralPath cannot receive $null in Windows PowerShell 5.1.
+        if ([string]::IsNullOrWhiteSpace($Folder)) { continue }
         if (Test-Path -LiteralPath $Folder -PathType Container) {
             foreach ($Found in @(Get-ChildItem -LiteralPath $Folder -Filter cmake.exe -File -Recurse -ErrorAction SilentlyContinue)) {
                 Add-CMakeCandidate $Found.FullName
