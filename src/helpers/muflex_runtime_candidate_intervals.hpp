@@ -40,7 +40,7 @@ public:
         intervals_ << "id,name,start_instruction,last_instruction,insns,termination,"
                        "next_compare_pc,nonsequential,distinct_pcs,untracked_pc_hits,"
                        "guest_image_writes,guest_external_writes,first_outside_themida,"
-                       "first_pc,last_pc,start_rdi,end_rax,end_rcx,end_rdx,end_rdi,end_rsp\n";
+                       "first_pc,last_pc,start_rdi,boundary_registers_valid,boundary_rax,boundary_rcx,boundary_rdx,boundary_rdi,boundary_rsp\n";
         checkpoints_ << "id,name,insn_index,offset,pc,size,rax,rcx,rdx,rdi,rsi,rsp,rflags\n";
         top_ << "id,name,pc,hits\n";
         enabled_=true;
@@ -152,7 +152,7 @@ private:
     }
 
     static bool checkpoint(std::uint64_t n) {
-        return n<=128 && (n&(n-1))==0 || n>128 && n%1024==0;
+        return (n<=128 && (n&(n-1))==0) || (n>128 && n%1024==0);
     }
     void sample(uc_engine* uc,const segment& s, std::uint64_t idx,
                 std::uint64_t pc,std::uint32_t size) {
@@ -188,14 +188,13 @@ private:
     void complete(uc_engine* uc, const char* reason, std::uint64_t next_cmp_pc) {
         if (!active_) return;
         auto& s=*active_;
-        if (uc) sample(uc,s,s.last_index,s.last_pc,s.last_size); // final endpoint
         intervals_ << s.id << ',' << s.name << ',' << s.start << ',' << s.last_index
                    << ',' << s.insns << ',' << reason << ','
                    << (next_cmp_pc ? hx(next_cmp_pc) : "") << ','
                    << s.nonseq << ',' << s.pcs.size() << ',' << s.untracked << ','
                    << s.image_writes << ',' << s.external_writes << ','
                    << (s.first_outside?1:0) << ',' << hx(s.first_pc)
-                   << ',' << hx(s.last_pc) << ',' << hx(s.start_rdi)
+                   << ',' << hx(s.last_pc) << ',' << hx(s.start_rdi) << ',' << (uc?1:0)
                    << ',' << hx(reg(uc,UC_X86_REG_RAX))
                    << ',' << hx(reg(uc,UC_X86_REG_RCX))
                    << ',' << hx(reg(uc,UC_X86_REG_RDX))
