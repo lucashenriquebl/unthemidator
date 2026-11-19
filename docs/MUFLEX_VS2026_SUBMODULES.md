@@ -38,14 +38,45 @@ Clone into a fresh directory without destroying current files:
     git clone --recurse-submodules https://github.com/lucashenriquebl/unthemidator.git C:\S21Lab\unthemidator-git
     powershell -NoProfile -ExecutionPolicy Bypass -File C:\S21Lab\unthemidator-git\scripts\build-v14-vs2026.ps1
 
-## CMake and MSBuild
+## CMake and MSBuild — VS2026
 
-The project currently requires CMake >=4.0. The updated builder attempts the system CMake first, then Visual Studio's bundled CMake, and verifies support for the Visual Studio 18 2026 generator.
+A previous build script incorrectly accepted CMake 4.0 but demanded the
+"Visual Studio 18 2026" generator, introduced only in **CMake 4.2**.
 
-If your edition is not in C:\Program Files\Microsoft Visual Studio\18\Community, pass -VS with your installation path.
+The updated script now supports both paths with Visual Studio 2026:
 
-For compiler failures after dependency setup, send the first MSBuild error in build\muflex_v14_msbuild.log. This change has not been built on Windows here.
+- **CMake 4.2+ with VS2026 generator:** generates a Visual Studio 2026
+  solution and builds it with MSBuild as before.
+- **CMake 3.31–4.1 (or a newer CMake without VS2026 generator):** initializes
+  the VS2026 x64 MSVC compiler environment using VsDevCmd.bat, uses Ninja to
+  generate/build, and places the executable and static catalogs in
+  `build\Release` so existing V25/V26/V27 scripts remain compatible.
 
-## V26
+Run:
 
-Once the tool compiles, run scripts/run-v26-probe.ps1 inside an isolated VM with the original GameServer binary. Never execute reconstructed Stage0 binaries directly.
+    cd C:\S21Lab\unthemidator-git
+    git switch master
+    git pull origin master
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-v14-vs2026.ps1
+
+If the build takes the Ninja fallback path, the CMake cache is isolated under
+`build-vs2026-ninja`, and the log is written to
+`build-vs2026-ninja\muflex_v14_ninja.log`.
+
+Required: the Visual Studio 2026 **Desktop development with C++** workload,
+MSBuild, CMake 3.31+, and either Ninja or a CMake 4.2+ VS2026 generator.
+The script checks these requirements and prints actionable errors.
+
+If your VS edition is not installed at
+`C:\Program Files\Microsoft Visual Studio\18\Community`, pass `-VS`
+with the actual installation directory.
+
+The compatibility fallback has been reviewed statically and requires a
+Windows build to confirm it on the user's installed toolchain. Do not
+execute reconstructed Stage0 binaries.
+
+## V26 and later
+
+After building, run the Unicorn diagnostic probe against the *original*
+GameServer input in a disposable VM. The observation does not mean a complete
+unpacked GameServer has been obtained.
