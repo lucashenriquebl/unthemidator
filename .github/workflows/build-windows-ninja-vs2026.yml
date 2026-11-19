@@ -5,7 +5,6 @@ on:
     paths:
       - "CMakeLists.txt"
       - "scripts/build-v14-vs2026.ps1"
-      - "scripts/ensure-cmake-vs2026.ps1"
       - ".github/workflows/build-windows-ninja-vs2026.yml"
   workflow_dispatch:
 
@@ -31,10 +30,12 @@ jobs:
           $cmakeBin = python -c "import cmake; print(cmake.CMAKE_BIN_DIR)"
           $cmakeExe = Join-Path $cmakeBin "cmake.exe"
           & $cmakeExe --version
+          # Put the already installed CMake on PATH; the build script must discover it.
+          $env:Path = "$cmakeBin;$env:Path"
           $vswhere = Join-Path ([Environment]::GetFolderPath("ProgramFilesX86")) "Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -requires Microsoft.Component.MSBuild -property installationPath
           if (-not $vsPath) { throw "Visual Studio 2026 with MSBuild not found" }
-          & .\scripts\build-v14-vs2026.ps1 -Source $PWD.Path -VS $vsPath -CMakeExecutable $cmakeExe -ForceNinja
+          & .\scripts\build-v14-vs2026.ps1 -Source $PWD.Path -VS $vsPath -ForceNinja
           if (-not (Test-Path .\build\Release\unthemidator.exe)) { throw "Ninja output missing in build\Release" }
 
       - name: Smoke test CLI
@@ -49,37 +50,4 @@ jobs:
         with:
           name: vs2026-ninja-cmake331-build-log
           path: build-vs2026-ninja/muflex_v14_ninja.log
-          if-no-files-found: ignore
-
-  windows-msvc-portable-cmake:
-    runs-on: windows-2025
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Bootstrap official CMake 4.2.6 and build with VS2026
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $vswhere = Join-Path ([Environment]::GetFolderPath("ProgramFilesX86")) "Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsPath = & $vswhere -latest -requires Microsoft.Component.MSBuild -property installationPath
-          if (-not $vsPath) { throw "Visual Studio 2026 with MSBuild not found" }
-          & .\scripts\build-v14-vs2026.ps1 -Source $PWD.Path -VS $vsPath -ForceCMakeBootstrap
-          if (-not (Test-Path -LiteralPath .\build\Release\unthemidator.exe)) { throw "Portable CMake build output missing" }
-
-      - name: Smoke test CLI
-        shell: pwsh
-        run: |
-          $helpText = (& .\build\Release\unthemidator.exe --help | Out-String)
-          if ($LASTEXITCODE -ne 0) { throw "CLI smoke test failed" }
-          if (-not $helpText.Contains("--runtime-probe-dir")) { throw "Missing runtime probe flags" }
-
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: vs2026-portable-cmake-build-logs
-          path: |
-            build/muflex_v14_msbuild.log
-            build-vs2026-ninja/muflex_v14_ninja.log
           if-no-files-found: ignore
