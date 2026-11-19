@@ -781,7 +781,7 @@ uc_err c_emulator_ctx::emulate(uint64_t start, const uint64_t end, const size_t 
 }
 
 void c_emulator_ctx::single_step(std::function<mem_callback_t> on_mem) {
-    uc_hook mem_trace;
+    uc_hook mem_trace = 0;
 
     if (on_mem) {
         uc_hook_add(m_uc, &mem_trace, UC_HOOK_MEM_READ | UC_HOOK_MEM_READ_UNMAPPED |
@@ -805,7 +805,8 @@ void c_emulator_ctx::single_step(std::function<mem_callback_t> on_mem) {
 void c_emulator_ctx::run(const uint64_t start, const uint64_t end, std::function<code_callback_t> on_code,
     std::function<mem_callback_t> on_mem) {
     //
-    uc_hook code_trace, mem_trace;
+    uc_hook code_trace = 0;
+    uc_hook mem_trace = 0;
     auto err = UC_ERR_OK;
 
     // if code callback function was provided, set up single step hook
