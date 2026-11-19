@@ -1,0 +1,51 @@
+name: Visual Studio 2026 Ninja fallback (CMake 3.31)
+
+on:
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "scripts/build-v14-vs2026.ps1"
+      - ".github/workflows/build-windows-ninja-vs2026.yml"
+  workflow_dispatch:
+
+jobs:
+  windows-msvc-ninja:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CMake 3.31.6 (no Visual Studio 18 generator)
+        run: python -m pip install "cmake==3.31.6"
+
+      - name: Compile with VS2026 MSVC and Ninja fallback
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cmakeBin = python -c "import cmake; print(cmake.CMAKE_BIN_DIR)"
+          $cmakeExe = Join-Path $cmakeBin "cmake.exe"
+          & $cmakeExe --version
+          $vswhere = Join-Path ([Environment]::GetFolderPath("ProgramFilesX86")) "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -requires Microsoft.Component.MSBuild -property installationPath
+          if (-not $vsPath) { throw "Visual Studio 2026 with MSBuild not found" }
+          & .\scripts\build-v14-vs2026.ps1 -Source $PWD.Path -VS $vsPath -CMakeExecutable $cmakeExe -ForceNinja
+          if (-not (Test-Path .\build\Release\unthemidator.exe)) { throw "Ninja output missing in build\Release" }
+
+      - name: Smoke test CLI
+        shell: pwsh
+        run: |
+          $helpText = (& .\build\Release\unthemidator.exe --help | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw "CLI help smoke test failed" }
+          if (-not $helpText.Contains("--runtime-probe-dir")) { throw "Missing runtime probe CLI" }
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: vs2026-ninja-cmake331-build-log
+          path: build-vs2026-ninja/muflex_v14_ninja.log
+          if-no-files-found: ignore
